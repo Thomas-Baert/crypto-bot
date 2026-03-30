@@ -131,3 +131,26 @@ async def get_prices(symbols: list[str]) -> dict[str, Optional[float]]:
         return result
     except Exception:
         return {s: None for s in valid}
+
+
+async def get_ohlc(symbol: str, days: str) -> Optional[list[list[float]]]:
+    """
+    Retourne l'historique OHLC (Open, High, Low, Close) d'une crypto.
+    Valeurs valides pour days: '1', '7', '14', '30', '90', '365', 'max'.
+    Format de retour : [[timestamp, open, high, low, close], ...]
+    """
+    cg_id = symbol_to_id(symbol)
+    if not cg_id:
+        return None
+
+    try:
+        session = get_session()
+        url = f"{COINGECKO_BASE}/coins/{cg_id}/ohlc"
+        params = {"vs_currency": "usd", "days": days}
+        async with session.get(url, params=params) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            return data
+    except Exception:
+        return None
