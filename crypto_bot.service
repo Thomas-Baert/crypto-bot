@@ -1,0 +1,28 @@
+[Unit]
+Description=Crypto Trading Discord Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# Chemin vers le dossier du projet sur le VPS (à modifier si besoin)
+WorkingDirectory=/opt/crypto-bot
+
+# Chemin vers l'exécutable Python (de préférence un environnement virtuel)
+# Exemple: /opt/crypto-bot/venv/bin/python
+ExecStart=/usr/bin/python3 main.py
+
+# Permet de charger les variables d'environnement si elles ne sont pas dans le script,
+# bien que dotenv le fasse déjà. Sécurité supplémentaire.
+EnvironmentFile=/opt/crypto-bot/.env
+
+Restart=always
+RestartSec=5
+
+# Redirection des logs
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=crypto-bot
+
+[Install]
+WantedBy=multi-user.target
