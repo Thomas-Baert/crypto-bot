@@ -2,18 +2,21 @@
 
 # Script de déploiement basique pour le VPS
 
-echo "Tirage des dernières modifications depuis Git..."
-git pull origin main
-
 echo "Installation des dépendances Python..."
 # Décommenter la ligne suivante si un environnement virtuel est utilisé
 # source venv/bin/activate
 pip install -r requirements.txt --break-system-packages
 
-echo "Redémarrage du service systemd..."
-sudo systemctl restart crypto_bot
+echo "Redémarrage du bot dans la session screen 'cryptobot'..."
 
-echo "Statut du service :"
-sudo systemctl status crypto_bot --no-pager
+# 1. Envoie "Ctrl+C" au terminal virtuel du screen pour arrêter l'exécution actuelle du main.py
+screen -S cryptobot -X stuff $'\003'
 
-echo "Déploiement terminé !"
+# 2. Petite pause pour laisser le temps au script de fermer proprement la base de données
+sleep 2
+
+# 3. Relance la commande pour allumer le bot
+screen -S cryptobot -X stuff "python3 main.py"$'\n'
+
+echo "Déploiement terminé ! Tu peux vérifier les logs à tout moment avec :"
+echo "screen -r cryptobot"
