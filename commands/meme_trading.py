@@ -6,7 +6,7 @@ import database as db
 import asyncio
 import pandas as pd
 import mplfinance as mpf
-from crypto_api import get_dexscreener_token, get_geckoterminal_ohlc
+from crypto_api import get_dexscreener_token, get_geckoterminal_ohlc, get_trending_memecoins
 
 
 class MemeCog(commands.Cog):
@@ -17,6 +17,41 @@ class MemeCog(commands.Cog):
 
     meme_group = app_commands.Group(name="meme", description="Spéculation sur les memecoins via leur Contrat")
 
+    # ─── /meme trending ─────────────────────────────────────────────────────
+
+    @meme_group.command(name="trending", description="Affiche les 10 memecoins les plus 'boostés' sur DexScreener")
+    async def meme_trending(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        
+        try:
+            trending = await get_trending_memecoins()
+            if not trending:
+                await interaction.followup.send(embed=error_embed("Impossible de récupérer les jetons tendance pour le moment."))
+                return
+
+            embed = discord.Embed(
+                title="🔥 Memecoins Tendance (Top Boosted)",
+                description="Voici les jetons qui font le plus de bruit sur DexScreener en ce moment.",
+                color=0xE74C3C
+            )
+            
+            for i, token in enumerate(trending, 1):
+                desc = token.get("description", "Pas de description")[:100] + "..."
+                contract = token.get('tokenAddress', '???')
+                url = token.get("url", "https://dexscreener.com")
+                chain = token.get("chainId", "unknown").upper()
+                
+                embed.add_field(
+                    name=f"{i}. {chain} — {token.get('symbol', '???')}",
+                    value=f"📝 {desc}\n📋 Contrat : `{contract}`\n🔗 [Voir sur DexScreener]({url})",
+                    inline=False
+                )
+
+            embed.set_footer(text="Utilise /meme infos <contrat> pour plus de détails.")
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(embed=error_embed(f"Une erreur est survenue : {e}"))
+
     # ─── /meme infos ────────────────────────────────────────────────────────
 
     @meme_group.command(name="infos", description="Affiche les infos d'un jeton DexScreener")
@@ -24,25 +59,31 @@ class MemeCog(commands.Cog):
     async def meme_infos(self, interaction: discord.Interaction, contrat: str):
         await interaction.response.defer(ephemeral=False)
         
-        token_data = await get_dexscreener_token(contrat)
-        if not token_data:
-            await interaction.followup.send(embed=error_embed("Jeton introuvable ou erreur de l'API DexScreener."))
-            return
+        try:
+            token_data = await get_dexscreener_token(contrat)
+            if not token_data:
+                await interaction.followup.send(embed=error_embed("Jeton introuvable ou erreur de l'API DexScreener."))
+                return
 
-        embed = discord.Embed(
-            title=f"🪙 {token_data['name']} ({token_data['symbol']})",
-            description=f"**Réseau :** `{token_data['network'].upper()}`\n**Contrat :** `{contrat}`",
-            color=0x1ABC9C
-        )
-        embed.add_field(name="Prix Unitaire", value=f"${token_data['price']:,.8f}", inline=True)
-        embed.add_field(name="Liquidité (Pool)", value=f"${token_data['liquidity']:,.0f}", inline=True)
-        
-        if token_data['liquidity'] < 5000:
-            embed.set_footer(text="⚠️ Attention : Ce jeton a très peu de liquidité. Achat bloqué.")
-        else:
-            embed.set_footer(text="✅ Statut : Achat autorisé")
+            embed = discord.Embed(
+                title=f"🪙 {token_data['name']} ({token_data['symbol']})",
+                description=f"**Réseau :** `{token_data['network'].upper()}`\n**Contrat :** `{contrat}`",
+                color=0x1ABC9C
+            )
+            embed.add_field(name="Prix Unitaire", value=f"${token_data['price']:,.8f}", inline=True)
+            embed.add_field(name="Liquidité (Pool)", value=f"${token_data['liquidity']:,.0f}", inline=True)
+            
+            if token_data.get("image_url"):
+                embed.set_thumbnail(url=token_data["image_url"])
+            
+            if token_data['liquidity'] < 5000:
+                embed.set_footer(text="⚠️ Attention : Ce jeton a très peu de liquidité. Achat bloqué.")
+            else:
+                embed.set_footer(text="✅ Statut : Achat autorisé")
 
-        await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(embed=error_embed(f"Une erreur est survenue : {e}"))
 
 
     # ─── /meme buy ────────────────────────────────────────────────────────
@@ -56,47 +97,53 @@ class MemeCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=False)
 
-        # Vérification du solde utilisateur
-        user = await db.get_or_create_user(interaction.user.id, interaction.user.display_name)
-        if user["balance"] < montant_usd:
-            await interaction.followup.send(embed=error_embed(f"Solde insuffisant ! Tu as **${user['balance']:,.2f}**."))
-            return
+        try:
+            # Vérification du solde utilisateur
+            user = await db.get_or_create_user(interaction.user.id, interaction.user.display_name)
+            if user["balance"] < montant_usd:
+                await interaction.followup.send(embed=error_embed(f"Solde insuffisant ! Tu as **${user['balance']:,.2f}**."))
+                return
 
-        # Fetch token
-        token_data = await get_dexscreener_token(contrat)
-        if not token_data:
-            await interaction.followup.send(embed=error_embed("Jeton introuvable. As-tu mis le bon contrat ?"))
-            return
+            # Fetch token
+            token_data = await get_dexscreener_token(contrat)
+            if not token_data:
+                await interaction.followup.send(embed=error_embed("Jeton introuvable. As-tu mis le bon contrat ?"))
+                return
 
-        if token_data['price'] == 0:
-            await interaction.followup.send(embed=error_embed("Impossible de récupérer le prix. Il vaut 0 ?"))
-            return
+            if token_data['price'] == 0:
+                await interaction.followup.send(embed=error_embed("Impossible de récupérer le prix. Il vaut 0 ?"))
+                return
 
-        if token_data['liquidity'] < 5000:
-             await interaction.followup.send(embed=error_embed(f"Liquidité insuffisante (${token_data['liquidity']:,.0f}). Le seuil minimum est de $5000 pour éviter les scams."))
-             return
+            if token_data['liquidity'] < 5000:
+                 await interaction.followup.send(embed=error_embed(f"Liquidité insuffisante (${token_data['liquidity']:,.0f}). Le seuil minimum est de $5000 pour éviter les scams."))
+                 return
 
-        quantite = montant_usd / token_data['price']
-        crypto_id = f"meme:{contrat}"
+            quantite = montant_usd / token_data['price']
+            crypto_id = f"meme:{contrat}"
 
-        new_balance = user["balance"] - montant_usd
-        await db.update_balance(interaction.user.id, new_balance)
+            new_balance = user["balance"] - montant_usd
+            await db.update_balance(interaction.user.id, new_balance)
 
-        current_qty = await db.get_holding(interaction.user.id, crypto_id)
-        await db.update_holding(interaction.user.id, crypto_id, current_qty + quantite)
+            current_qty = await db.get_holding(interaction.user.id, crypto_id)
+            await db.update_holding(interaction.user.id, crypto_id, current_qty + quantite)
 
-        embed = discord.Embed(
-            title="✅ Achat Memecoin Réussi",
-            description=f"Tu as acheté **{quantite:,.2f} {token_data['symbol']}** !",
-            color=0x2ECC71
-        )
-        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        embed.add_field(name="Coût Total", value=f"${montant_usd:,.2f}", inline=True)
-        embed.add_field(name="Prix d'achat", value=f"${token_data['price']:,.8f}", inline=True)
-        embed.add_field(name="Nouveau Solde Cash", value=f"${new_balance:,.2f}", inline=False)
-        embed.set_footer(text=f"Nom du jeton : {token_data['name']}")
+            embed = discord.Embed(
+                title="✅ Achat Memecoin Réussi",
+                description=f"Tu as acheté **{quantite:,.2f} {token_data['symbol']}** !",
+                color=0x2ECC71
+            )
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+            embed.add_field(name="Coût Total", value=f"${montant_usd:,.2f}", inline=True)
+            embed.add_field(name="Prix d'achat", value=f"${token_data['price']:,.8f}", inline=True)
+            embed.add_field(name="Nouveau Solde Cash", value=f"${new_balance:,.2f}", inline=False)
+            embed.set_footer(text=f"Nom du jeton : {token_data['name']}")
 
-        await interaction.followup.send(embed=embed)
+            if token_data.get("image_url"):
+                embed.set_thumbnail(url=token_data["image_url"])
+
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(embed=error_embed(f"Une erreur est survenue : {e}"))
 
 
     # ─── /meme sell ───────────────────────────────────────────────────────
@@ -106,58 +153,64 @@ class MemeCog(commands.Cog):
     async def meme_sell(self, interaction: discord.Interaction, contrat: str, quantite: str):
         await interaction.response.defer(ephemeral=False)
         
-        crypto_id = f"meme:{contrat}"
-        current_qty = await db.get_holding(interaction.user.id, crypto_id)
+        try:
+            crypto_id = f"meme:{contrat}"
+            current_qty = await db.get_holding(interaction.user.id, crypto_id)
 
-        if current_qty <= 0:
-            await interaction.followup.send(embed=error_embed("Tu ne possèdes pas de jetons sur ce contrat !"))
-            return
-
-        if quantite.lower() == "all":
-            qty_to_sell = current_qty
-        else:
-            try:
-                qty_to_sell = float(quantite)
-            except ValueError:
-                await interaction.followup.send(embed=error_embed("La quantité doit être un nombre ou 'all'."))
+            if current_qty <= 0:
+                await interaction.followup.send(embed=error_embed("Tu ne possèdes pas de jetons sur ce contrat !"))
                 return
 
-            if qty_to_sell <= 0:
-                await interaction.followup.send(embed=error_embed("La quantité doit être positive."))
+            if quantite.lower() == "all":
+                qty_to_sell = current_qty
+            else:
+                try:
+                    qty_to_sell = float(quantite)
+                except ValueError:
+                    await interaction.followup.send(embed=error_embed("La quantité doit être un nombre ou 'all'."))
+                    return
+
+                if qty_to_sell <= 0:
+                    await interaction.followup.send(embed=error_embed("La quantité doit être positive."))
+                    return
+
+                if qty_to_sell > current_qty:
+                    await interaction.followup.send(embed=error_embed(f"Tu n'en possèdes pas assez ! Tu as **{current_qty:,.4f}**."))
+                    return
+
+            token_data = await get_dexscreener_token(contrat)
+            if not token_data or token_data['price'] == 0:
+                await interaction.followup.send(embed=error_embed("Impossible de récupérer le prix actuel pour la revente."))
                 return
 
-            if qty_to_sell > current_qty:
-                await interaction.followup.send(embed=error_embed(f"Tu n'en possèdes pas assez ! Tu as **{current_qty:,.4f}**."))
-                return
+            total_value = qty_to_sell * token_data['price']
 
-        token_data = await get_dexscreener_token(contrat)
-        if not token_data or token_data['price'] == 0:
-            await interaction.followup.send(embed=error_embed("Impossible de récupérer le prix actuel pour la revente."))
-            return
+            # Update DB
+            user = await db.get_or_create_user(interaction.user.id, interaction.user.display_name)
+            new_balance = user["balance"] + total_value
+            await db.update_balance(interaction.user.id, new_balance)
 
-        total_value = qty_to_sell * token_data['price']
+            new_qty = current_qty - qty_to_sell
+            if new_qty < 1e-8:
+                new_qty = 0.0
+            await db.update_holding(interaction.user.id, crypto_id, new_qty)
 
-        # Update DB
-        user = await db.get_user(interaction.user.id)
-        new_balance = user["balance"] + total_value
-        await db.update_balance(interaction.user.id, new_balance)
+            embed = discord.Embed(
+                title="🤝 Vente Memecoin Réussie",
+                description=f"Tu as vendu **{qty_to_sell:,.2f} {token_data['symbol']}** !",
+                color=0x3498DB
+            )
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+            embed.add_field(name="Gains", value=f"+${total_value:,.2f}", inline=True)
+            embed.add_field(name="Prix de vente", value=f"${token_data['price']:,.8f}", inline=True)
+            embed.add_field(name="Nouveau Solde Cash", value=f"${new_balance:,.2f}", inline=False)
 
-        new_qty = current_qty - qty_to_sell
-        if new_qty < 1e-8:
-            new_qty = 0.0
-        await db.update_holding(interaction.user.id, crypto_id, new_qty)
+            if token_data.get("image_url"):
+                embed.set_thumbnail(url=token_data["image_url"])
 
-        embed = discord.Embed(
-            title="🤝 Vente Memecoin Réussie",
-            description=f"Tu as vendu **{qty_to_sell:,.2f} {token_data['symbol']}** !",
-            color=0x3498DB
-        )
-        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        embed.add_field(name="Gains", value=f"+${total_value:,.2f}", inline=True)
-        embed.add_field(name="Prix de vente", value=f"${token_data['price']:,.8f}", inline=True)
-        embed.add_field(name="Nouveau Solde Cash", value=f"${new_balance:,.2f}", inline=False)
-
-        await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(embed=error_embed(f"Une erreur est survenue : {e}"))
 
 
     # ─── /meme chart ────────────────────────────────────────────────────────

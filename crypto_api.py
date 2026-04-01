@@ -174,17 +174,89 @@ async def get_dexscreener_token(address: str) -> Optional[dict]:
                 # Pour éviter le scam, on prend la pair la plus liquide
                 best_pair = max(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0) or 0))
                 
+                chain_id = best_pair.get("chainId", "")
+                token_address = best_pair.get("baseToken", {}).get("address", "")
+                
+                # Pattern d'URL d'icône DexScreener
+                image_url = f"https://cdn.dexscreener.com/tokens/solana/{token_address}.png" if chain_id == "solana" else None
+                # Alternative via pair info si dispo (parfois dans 'info')
+                info = best_pair.get("info", {})
+                if info and info.get("imageUrl"):
+                    image_url = info.get("imageUrl")
+
                 return {
                     "price": float(best_pair.get("priceUsd", 0) or 0),
                     "name": best_pair.get("baseToken", {}).get("name", "Unknown"),
                     "symbol": best_pair.get("baseToken", {}).get("symbol", "UKN"),
                     "liquidity": float(best_pair.get("liquidity", {}).get("usd", 0) or 0),
-                    "network": best_pair.get("chainId", ""),
-                    "pool_address": best_pair.get("pairAddress", "")
+                    "network": chain_id,
+                    "pool_address": best_pair.get("pairAddress", ""),
+                    "image_url": image_url
                 }
     except Exception as e:
         print(f"Error fetching DexScreener: {e}")
     return None
+
+async def get_trending_memecoins() -> list[dict]:
+    """Récupère les 10 meilleurs jetons boostés du moment."""
+    session = get_session()
+    url = "https://api.dexscreener.com/token-boosts/top/v1"
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                # On prend les 10 premiers
+                return data[:10]
+            return []
+    except Exception:
+        return []
+
+async def get_dexscreener_tokens(addresses: list[str]) -> dict[str, dict]:
+    """Récupère les infos (prix, nom, symbole, image) de plusieurs contrats."""
+    if not addresses:
+        return {}
+    
+    clean_addrs = [a.replace("meme:", "") for a in addresses]
+    addr_string = ",".join(clean_addrs[:30])
+    
+    result = {}
+    session = get_session()
+    try:
+        async with session.get(f"{DEXSCREENER_API}/{addr_string}") as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                for pair in data.get("pairs", []):
+                    addr = pair.get("baseToken", {}).get("address", "")
+                    # On garde la pair la plus liquide pour chaque token unique
+                    if addr not in result or float(pair.get("liquidity", {}).get("usd", 0) or 0) > result[addr].get("liquidity", 0):
+                        token_address = addr
+                        chain_id = pair.get("chainId", "")
+                        
+                        image_url = f"https://cdn.dexscreener.com/tokens/solana/{token_address}.png" if chain_id == "solana" else None
+                        info = pair.get("info", {})
+                        if info and info.get("imageUrl"):
+                            image_url = info.get("imageUrl")
+
+                        result[addr] = {
+                            "price": float(pair.get("priceUsd", 0) or 0),
+                            "name": pair.get("baseToken", {}).get("name", "Unknown"),
+                            "symbol": pair.get("baseToken", {}).get("symbol", "UKN"),
+                            "liquidity": float(pair.get("liquidity", {}).get("usd", 0) or 0),
+                            "image_url": image_url
+                        }
+    except Exception:
+        pass
+    
+    # Mapper vers les clés meme:{adresse}
+    final_dict = {}
+    for a in clean_addrs:
+        # Correspondance insensible à la casse
+        match = next((v for k, v in result.items() if k.lower() == a.lower()), None)
+        if match:
+            final_dict[f"meme:{a}"] = match
+            
+    return final_dict
+
 
 async def get_dexscreener_prices(addresses: list[str]) -> dict[str, float]:
     """Récupère le prix de plusieurs contrats en une seule requête."""
