@@ -25,6 +25,16 @@ async def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS lilian_bets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                amount REAL,
+                bet_type TEXT,
+                val1 REAL,
+                val2 REAL
+            )
+        """)
         await db.commit()
 
 
@@ -135,3 +145,32 @@ async def get_all_holdings() -> list[dict]:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+
+async def place_lilian_bet(user_id: str, amount: float, bet_type: str, val1: float, val2: float = None):
+    """Enregistre un pari sur la note de Lilian."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO lilian_bets (user_id, amount, bet_type, val1, val2)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (str(user_id), amount, bet_type, val1, val2),
+        )
+        await db.commit()
+
+
+async def get_all_lilian_bets() -> list[dict]:
+    """Récupère tous les paris en cours."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM lilian_bets") as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def clear_lilian_bets():
+    """Supprime tous les paris une fois la note résolue."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM lilian_bets")
+        await db.commit()

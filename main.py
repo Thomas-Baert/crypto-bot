@@ -12,6 +12,7 @@ from commands.portfolio import PortfolioCog
 from commands.market import MarketCog
 from commands.leaderboard import LeaderboardCog
 from commands.chart import ChartCog
+from commands.betting import BettingCog
 
 load_dotenv()
 
@@ -35,6 +36,7 @@ class CryptoBot(commands.Bot):
         await self.add_cog(MarketCog())
         await self.add_cog(LeaderboardCog())
         await self.add_cog(ChartCog())
+        await self.add_cog(BettingCog(self))
 
         # Sync les commandes
         if GUILD_ID:
