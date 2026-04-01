@@ -1,8 +1,11 @@
 import os
+import io
 import discord
 from discord.ext import commands
 from discord import app_commands
 import database as db
+import matplotlib.pyplot as plt
+import asyncio
 
 class BettingCog(commands.Cog):
     """Commandes liées aux paris événementiels (Soutenance de Lilian)."""
@@ -187,6 +190,118 @@ class BettingCog(commands.Cog):
 
         embed.set_footer(text=f"Total de gains reversés : ${total_payout:,.2f}")
         await interaction.followup.send(embed=embed)
+
+    # ─── /pari liste (Graphique) ─────────────────────────────────────────────
+
+    @pari_group.command(name="liste", description="📊 Affiche un diagramme bâton des paris en cours")
+    async def liste_paris(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        all_bets = await db.get_all_lilian_bets()
+        
+        if not all_bets:
+            await interaction.followup.send(embed=error_embed("Aucun pari n'a encore été enregistré sur la note de Lilian !"))
+            return
+
+        total_pool = sum(b['amount'] for b in all_bets)
+        
+        try:
+            file = await asyncio.to_thread(self._generate_bar_chart, all_bets)
+            embed = discord.Embed(
+                title="📊 Répartition des Paris",
+                description=f"Voici la répartition mathématique des probabilités selon les mises des joueurs.\n\n💰 **Cagnotte Totale en jeu : ${total_pool:,.2f}**",
+                color=0x3498DB
+            )
+            embed.set_image(url="attachment://bet_distribution.png")
+            embed.set_footer(text="Généré avec matplotlib • Les paris d'intervalle sont répartis équitablement")
+            await interaction.followup.send(embed=embed, file=file)
+        except Exception as e:
+            await interaction.followup.send(embed=error_embed(f"Erreur lors de la génération du diagramme : {e}"))
+
+    def _generate_bar_chart(self, all_bets: list[dict]) -> discord.File:
+        """Dessine un diagramme en bâtons avec matplotlib et le renvoie sous forme de fichier discord."""
+        # Initialise les montants à 0 pour chaque note de 0 à 20
+        amounts_by_note = {i: 0.0 for i in range(21)}
+
+        for bet in all_bets:
+            amt = bet["amount"]
+            btype = bet["bet_type"]
+            val1 = bet["val1"]
+            val2 = bet["val2"]
+
+            # L'axe X n'affiche que des entiers (0, 1, ..., 20)
+            v1_int = int(round(val1))
+            v2_int = int(round(val2)) if val2 is not None else None
+
+            if btype == "exact":
+                if 0 <= v1_int <= 20:
+                    amounts_by_note[v1_int] += amt
+            elif btype == "min":
+                v1_int = max(0, v1_int)
+                spread_count = 20 - v1_int + 1
+                if spread_count > 0:
+                    spread_amt = amt / spread_count
+                    for i in range(v1_int, 21):
+                        amounts_by_note[i] += spread_amt
+            elif btype == "max":
+                v1_int = min(20, v1_int)
+                spread_count = v1_int + 1
+                if spread_count > 0:
+                    spread_amt = amt / spread_count
+                    for i in range(0, v1_int + 1):
+                        amounts_by_note[i] += spread_amt
+            elif btype == "intervalle":
+                v1_int = max(0, v1_int)
+                v2_int = min(20, v2_int)
+                if v1_int <= v2_int:
+                    spread_count = v2_int - v1_int + 1
+                    spread_amt = amt / spread_count
+                    for i in range(v1_int, v2_int + 1):
+                        amounts_by_note[i] += spread_amt
+
+        x = list(amounts_by_note.keys())
+        y = list(amounts_by_note.values())
+
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        # Couleur de fond type Discord Dark Theme
+        discord_bg = '#2b2d31'
+        fig.patch.set_facecolor(discord_bg)
+        ax.set_facecolor(discord_bg)
+
+        # Dessin des bâtons (Dorés)
+        bars = ax.bar(x, y, color='#F1C40F', edgecolor='#e67e22', zorder=3)
+        
+        ax.set_title("Répartition de l'argent misé sur chaque note", color='white', fontsize=14, pad=15)
+        ax.set_xlabel("Notes (de 0 à 20)", color='#b9bbbe', fontsize=12)
+        ax.set_ylabel("Total Parié Équivalent ($)", color='#b9bbbe', fontsize=12)
+        ax.set_xticks(range(21))
+        
+        # Design et nettoyage
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_color('#8e9297')
+        ax.spines['bottom'].set_color('#8e9297')
+        ax.tick_params(colors='#8e9297')
+        ax.grid(axis='y', linestyle='--', alpha=0.2, zorder=0)
+
+        # Ajout des valeurs au-dessus des barres
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:
+                ax.annotate(f'${height:,.0f}',
+                            xy=(bar.get_x() + bar.get_width() / 2, height),
+                            xytext=(0, 3),  
+                            textcoords="offset points",
+                            ha='center', va='bottom', color='white', fontsize=9)
+
+        # Copie dans la RAM
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=120)
+        plt.close(fig)
+        buf.seek(0)
+        
+        return discord.File(fp=buf, filename="bet_distribution.png")
 
 
 def error_embed(msg: str) -> discord.Embed:
