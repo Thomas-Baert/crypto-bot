@@ -154,3 +154,79 @@ async def get_ohlc(symbol: str, days: str) -> Optional[list[list[float]]]:
             return data
     except Exception:
         return None
+
+
+# ─── DEXSCREENER & GECKOTERMINAL API (Pour les Memecoins) ───────────────
+
+DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
+GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
+
+async def get_dexscreener_token(address: str) -> Optional[dict]:
+    """Récupère les infos complètes d'un token via DexScreener."""
+    session = get_session()
+    try:
+        async with session.get(f"{DEXSCREENER_API}/{address}") as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                pairs = data.get("pairs", [])
+                if not pairs:
+                    return None
+                # Pour éviter le scam, on prend la pair la plus liquide
+                best_pair = max(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0) or 0))
+                
+                return {
+                    "price": float(best_pair.get("priceUsd", 0) or 0),
+                    "name": best_pair.get("baseToken", {}).get("name", "Unknown"),
+                    "symbol": best_pair.get("baseToken", {}).get("symbol", "UKN"),
+                    "liquidity": float(best_pair.get("liquidity", {}).get("usd", 0) or 0),
+                    "network": best_pair.get("chainId", ""),
+                    "pool_address": best_pair.get("pairAddress", "")
+                }
+    except Exception as e:
+        print(f"Error fetching DexScreener: {e}")
+    return None
+
+async def get_dexscreener_prices(addresses: list[str]) -> dict[str, float]:
+    """Récupère le prix de plusieurs contrats en une seule requête."""
+    if not addresses:
+        return {}
+    
+    # On enlève le mot 'meme:'
+    clean_addrs = [a.replace("meme:", "") for a in addresses]
+    addr_string = ",".join(clean_addrs[:30])
+    
+    result = {a: 0.0 for a in clean_addrs}
+    session = get_session()
+    try:
+        async with session.get(f"{DEXSCREENER_API}/{addr_string}") as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                for pair in data.get("pairs", []):
+                    addr = pair.get("baseToken", {}).get("address", "").lower()
+                    for req_addr in clean_addrs:
+                        if req_addr.lower() == addr and result[req_addr] == 0.0:
+                             result[req_addr] = float(pair.get("priceUsd", 0) or 0)
+    except Exception:
+        pass
+    
+    # On renvoie le dictionnaire sous forme meme:{adresse} pour compatibilité avec le portofolio
+    return {f"meme:{a}": price for a, price in result.items() if price > 0}
+
+async def get_geckoterminal_ohlc(network: str, pool_address: str, timeframe: str = "day") -> Optional[list[list[float]]]:
+    """
+    Récupère le graphique OHLC depuis GeckoTerminal pour un pool (Raydium, etc).
+    timeframe = 'day', 'hour', ou 'minute'
+    """
+    session = get_session()
+    url = f"{GECKOTERMINAL_API}/networks/{network}/pools/{pool_address}/ohlcv/{timeframe}?limit=200"
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                ohlcv = data.get("data", {}).get("attributes", {}).get("ohlcv_list", [])
+                ohlcv.reverse()
+                # On tronque à [timestamp, open, high, low, close]
+                return [row[:5] for row in ohlcv]
+            return None
+    except Exception:
+        return None

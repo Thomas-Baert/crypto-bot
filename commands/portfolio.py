@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import database as db
-from crypto_api import get_prices, CRYPTO_NAMES, CRYPTO_EMOJIS
+from crypto_api import get_prices, get_dexscreener_prices, CRYPTO_NAMES, CRYPTO_EMOJIS
 
 
 class PortfolioCog(commands.Cog):
@@ -37,8 +37,13 @@ class PortfolioCog(commands.Cog):
                 "Utilise `/buy` pour commencer à investir !"
             )
         else:
-            symbols = [h["crypto_id"] for h in holdings]
-            prices = await get_prices(symbols)
+            cg_symbols = [h["crypto_id"] for h in holdings if not h["crypto_id"].startswith("meme:")]
+            meme_symbols = [h["crypto_id"] for h in holdings if h["crypto_id"].startswith("meme:")]
+
+            prices = await get_prices(cg_symbols) if cg_symbols else {}
+            meme_prices = await get_dexscreener_prices(meme_symbols) if meme_symbols else {}
+            
+            prices.update(meme_prices)
 
             lines = []
             for h in sorted(holdings, key=lambda x: x["crypto_id"]):
@@ -49,20 +54,28 @@ class PortfolioCog(commands.Cog):
 
                 portfolio_value += value
 
-                emoji = CRYPTO_EMOJIS.get(sym, "•")
-                name = CRYPTO_NAMES.get(sym, sym)
+                if sym.startswith("meme:"):
+                    emoji = "🪙"
+                    # Raccourcit le contrat CA qui est très long
+                    ca_short = sym.replace('meme:', '')[:8] + "..."
+                    name = f"Memecoin"
+                    display_sym = ca_short
+                else:
+                    emoji = CRYPTO_EMOJIS.get(sym, "•")
+                    display_sym = sym
+                    name = CRYPTO_NAMES.get(sym, sym)
 
                 if price > 0:
                     lines.append(
-                        f"{emoji} **{name}** ({sym})\n"
-                        f"┣ Quantité : `{amount:.6f}`\n"
-                        f"┣ Prix unitaire : `${price:,.4f}`\n"
+                        f"{emoji} **{name}** ({display_sym})\n"
+                        f"┣ Quantité : `{amount:,.6f}`\n"
+                        f"┣ Prix unitaire : `${price:,.6f}`\n"
                         f"┗ Valeur : **${value:,.2f}**"
                     )
                 else:
                     lines.append(
-                        f"{emoji} **{name}** ({sym})\n"
-                        f"┣ Quantité : `{amount:.6f}`\n"
+                        f"{emoji} **{name}** ({display_sym})\n"
+                        f"┣ Quantité : `{amount:,.6f}`\n"
                         f"┗ Prix : *indisponible*"
                     )
 

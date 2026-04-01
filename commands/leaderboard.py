@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import database as db
-from crypto_api import get_prices
+from crypto_api import get_prices, get_dexscreener_prices
 
 
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
@@ -32,9 +32,14 @@ class LeaderboardCog(commands.Cog):
             )
             return
 
-        # Récupère tous les symboles uniques pour un seul appel API
+        # Récupère tous les symboles uniques
         all_symbols = list({h["crypto_id"] for h in all_holdings})
-        prices = await get_prices(all_symbols) if all_symbols else {}
+        cg_symbols = [s for s in all_symbols if not s.startswith("meme:")]
+        meme_symbols = [s for s in all_symbols if s.startswith("meme:")]
+
+        prices = await get_prices(cg_symbols) if cg_symbols else {}
+        meme_prices = await get_dexscreener_prices(meme_symbols) if meme_symbols else {}
+        prices.update(meme_prices)
 
         # Calcule la valeur totale de chaque user
         # Construit un index holdings par user_id
