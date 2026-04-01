@@ -6,7 +6,7 @@ import database as db
 import asyncio
 import pandas as pd
 import mplfinance as mpf
-from crypto_api import get_dexscreener_token, get_geckoterminal_ohlc, get_trending_memecoins
+from crypto_api import get_dexscreener_token, get_dexscreener_tokens, get_geckoterminal_ohlc, get_trending_memecoins
 
 
 class MemeCog(commands.Cog):
@@ -29,6 +29,10 @@ class MemeCog(commands.Cog):
                 await interaction.followup.send(embed=error_embed("Impossible de récupérer les jetons tendance pour le moment."))
                 return
 
+            # On récupère les adresses pour enrichir avec les symboles réels
+            addresses = [t.get("tokenAddress") for t in trending if t.get("tokenAddress")]
+            token_metadata = await get_dexscreener_tokens(addresses) if addresses else {}
+
             embed = discord.Embed(
                 title="🔥 Memecoins Tendance (Top Boosted)",
                 description="Voici les jetons qui font le plus de bruit sur DexScreener en ce moment.",
@@ -36,13 +40,18 @@ class MemeCog(commands.Cog):
             )
             
             for i, token in enumerate(trending, 1):
-                desc = token.get("description", "Pas de description")[:100] + "..."
                 contract = token.get('tokenAddress', '???')
+                # On cherche dans nos métadonnées enrichies
+                meta = token_metadata.get(f"meme:{contract}", {})
+                symbol = meta.get("symbol", "???")
+                name = meta.get("name", "Inconnu")
+                
+                desc = token.get("description", "Pas de description")[:100] + "..."
                 url = token.get("url", "https://dexscreener.com")
                 chain = token.get("chainId", "unknown").upper()
                 
                 embed.add_field(
-                    name=f"{i}. {chain} — {token.get('symbol', '???')}",
+                    name=f"{i}. {chain} — {name} ({symbol})",
                     value=f"📝 {desc}\n📋 Contrat : `{contract}`\n🔗 [Voir sur DexScreener]({url})",
                     inline=False
                 )
