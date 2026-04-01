@@ -76,10 +76,7 @@ class MemeCog(commands.Cog):
             if token_data.get("image_url"):
                 embed.set_thumbnail(url=token_data["image_url"])
             
-            if token_data['liquidity'] < 5000:
-                embed.set_footer(text="⚠️ Attention : Ce jeton a très peu de liquidité. Achat bloqué.")
-            else:
-                embed.set_footer(text="✅ Statut : Achat autorisé")
+            embed.set_footer(text="✅ Statut : Achat autorisé")
 
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -114,9 +111,8 @@ class MemeCog(commands.Cog):
                 await interaction.followup.send(embed=error_embed("Impossible de récupérer le prix. Il vaut 0 ?"))
                 return
 
-            if token_data['liquidity'] < 5000:
-                 await interaction.followup.send(embed=error_embed(f"Liquidité insuffisante (${token_data['liquidity']:,.0f}). Le seuil minimum est de $5000 pour éviter les scams."))
-                 return
+            # Limite de liquidité retirée par demande de l'utilisateur
+            pass
 
             quantite = montant_usd / token_data['price']
             crypto_id = f"meme:{contrat}"
